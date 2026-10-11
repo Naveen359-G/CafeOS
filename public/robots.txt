@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://cafeos-ai.vercel.app/sitemap.xml

@@ -145,48 +145,58 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Mobile Thumb Navigation */}
-      <div className="flex md:hidden items-center justify-around px-2 py-2 border-t border-[#EAE2DA] bg-[#F7F2EB] text-xs font-medium text-[#6B5A50] overflow-x-auto">
+      <nav aria-label="Customer Navigation" className="flex md:hidden items-center gap-1.5 px-3 py-2 border-t border-[#EAE2DA] bg-[#F7F2EB] text-xs font-medium text-[#6B5A50] overflow-x-auto no-scrollbar scroll-smooth">
         <button
           onClick={() => setActiveTab('experience')}
-          className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
-            activeTab === 'experience' ? 'text-[#261B16] bg-white font-semibold shadow-xs' : ''
+          className={`px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer shrink-0 ${
+            activeTab === 'experience'
+              ? 'text-[#261B16] bg-white font-semibold shadow-xs border border-[#E0D5CB]'
+              : 'hover:text-[#261B16]'
           }`}
         >
           AI Barista
         </button>
         <button
           onClick={() => setActiveTab('menu')}
-          className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
-            activeTab === 'menu' ? 'text-[#261B16] bg-white font-semibold shadow-xs' : ''
+          className={`px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer shrink-0 ${
+            activeTab === 'menu'
+              ? 'text-[#261B16] bg-white font-semibold shadow-xs border border-[#E0D5CB]'
+              : 'hover:text-[#261B16]'
           }`}
         >
           Menu
         </button>
         <button
           onClick={() => setActiveTab('vibe')}
-          className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
-            activeTab === 'vibe' ? 'text-[#261B16] bg-white font-semibold shadow-xs' : ''
+          className={`px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer shrink-0 ${
+            activeTab === 'vibe'
+              ? 'text-[#261B16] bg-white font-semibold shadow-xs border border-[#E0D5CB]'
+              : 'hover:text-[#261B16]'
           }`}
         >
-          Floor Map
+          Floor Map & Vibe
         </button>
         <button
           onClick={() => setActiveTab('loyalty')}
-          className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
-            activeTab === 'loyalty' ? 'text-[#261B16] bg-white font-semibold shadow-xs' : ''
+          className={`px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer shrink-0 ${
+            activeTab === 'loyalty'
+              ? 'text-[#261B16] bg-white font-semibold shadow-xs border border-[#E0D5CB]'
+              : 'hover:text-[#261B16]'
           }`}
         >
-          Rewards
+          Rewards & Stamps
         </button>
         <button
           onClick={() => setActiveTab('pulse')}
-          className={`px-2.5 py-1 rounded transition-colors whitespace-nowrap ${
-            activeTab === 'pulse' ? 'text-[#261B16] bg-white font-semibold shadow-xs' : ''
+          className={`px-3 py-1.5 rounded-full transition-all whitespace-nowrap cursor-pointer shrink-0 ${
+            activeTab === 'pulse'
+              ? 'text-[#261B16] bg-white font-semibold shadow-xs border border-[#E0D5CB]'
+              : 'hover:text-[#261B16]'
           }`}
         >
-          Feedback
+          Guest Feedback
         </button>
-      </div>
+      </nav>
     </header>
   );
 };

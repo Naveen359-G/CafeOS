@@ -3,21 +3,31 @@ import {
   Sparkles,
   RefreshCw,
   TrendingUp,
-  Users,
   Coffee,
   IndianRupee,
   Star,
   Clock,
-  AlertTriangle,
   Plus,
   Edit2,
   Trash2,
-  CheckCircle,
-  ToggleLeft,
-  ToggleRight,
   Filter,
   X,
+  Calendar,
+  Sunrise,
+  Sun,
+  Moon,
 } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Legend,
+  CartesianGrid,
+  Cell,
+} from 'recharts';
 import { DemoOrder, CustomerFeedback, MenuItem } from '../types';
 
 interface ManagerViewProps {
@@ -39,7 +49,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
   onDeleteMenuItem,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'overview' | 'menu' | 'history'>('overview');
+  const [activeTab, setActiveTab] = useState<'overview' | 'orders' | 'analytics' | 'menu'>('analytics');
   const [insight, setInsight] = useState<{
     summary: string;
     actionableRecommendation: string;
@@ -48,6 +58,11 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
     isAiGenerated: boolean;
   } | null>(null);
   const [isLoadingInsight, setIsLoadingInsight] = useState(false);
+
+  // Orders Filter state & Analytics Date Range filter state
+  const [selectedDateFilter, setSelectedDateFilter] = useState<string>('all');
+  const [selectedStatusFilter, setSelectedStatusFilter] = useState<string>('all');
+  const [analyticsDateRange, setAnalyticsDateRange] = useState<string>('all');
 
   // Modal for Adding / Editing Menu item
   const [isEditingItem, setIsEditingItem] = useState(false);
@@ -72,17 +87,35 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
     imageUrl: '',
   });
 
-  // KPI Calculations based on real demo orders
-  const totalOrders = orders.length;
-  const activeOrders = orders.filter((o) => o.status !== 'completed');
-  const completedOrders = orders.filter((o) => o.status === 'completed');
-  const simulatedGross = orders.reduce((sum, o) => sum + o.totalAmount, 0);
+  // Filter orders by analytics date range
+  const filteredAnalyticsOrders = orders.filter((o) => {
+    if (analyticsDateRange === 'all') return true;
+    const orderDate = new Date(o.createdAt);
+    const now = new Date();
+    if (analyticsDateRange === 'today') {
+      return orderDate.toDateString() === now.toDateString();
+    } else if (analyticsDateRange === 'last7days') {
+      const diffTime = Math.abs(now.getTime() - orderDate.getTime());
+      const diffDays = diffTime / (1000 * 60 * 60 * 24);
+      return diffDays <= 7;
+    } else {
+      // Specific date string (YYYY-MM-DD)
+      const orderDateStr = orderDate.toISOString().split('T')[0];
+      return orderDateStr === analyticsDateRange;
+    }
+  });
+
+  // KPI Calculations based on filtered analytics orders
+  const totalOrders = filteredAnalyticsOrders.length;
+  const activeOrders = filteredAnalyticsOrders.filter((o) => o.status !== 'completed');
+  const completedOrders = filteredAnalyticsOrders.filter((o) => o.status === 'completed');
+  const simulatedGross = filteredAnalyticsOrders.reduce((sum, o) => sum + o.totalAmount, 0);
   const avgOrderValue = totalOrders > 0 ? Math.round(simulatedGross / totalOrders) : 0;
 
   // Overdue count
-  const now = Date.now();
+  const nowTs = Date.now();
   const overdueCount = activeOrders.filter((o) => {
-    const elapsedMinutes = (now - o.createdAt) / (1000 * 60);
+    const elapsedMinutes = (nowTs - o.createdAt) / (1000 * 60);
     return elapsedMinutes > (o.prepWarningThresholdMinutes || 2);
   }).length;
 
@@ -96,27 +129,106 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
         ).toFixed(1)
       : '2.5';
 
-  // Popular items
-  const itemCountMap: Record<string, { count: number; category: string }> = {};
-  orders.forEach((o) => {
+  // Popular items overall in filtered orders
+  const itemCountMap: Record<string, { count: number; category: string; revenue: number }> = {};
+  filteredAnalyticsOrders.forEach((o) => {
     o.items.forEach((itemObj) => {
       const name = itemObj.item.name;
       if (!itemCountMap[name]) {
-        itemCountMap[name] = { count: 0, category: itemObj.item.category };
+        itemCountMap[name] = { count: 0, category: itemObj.item.category, revenue: 0 };
       }
       itemCountMap[name].count += itemObj.quantity;
+      itemCountMap[name].revenue += itemObj.item.price * itemObj.quantity;
     });
   });
 
   const topDrinks = Object.entries(itemCountMap)
     .filter(([_, data]) => data.category === 'drink')
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 3);
+    .slice(0, 5);
 
   const topSnacks = Object.entries(itemCountMap)
     .filter(([_, data]) => data.category === 'snack')
     .sort((a, b) => b[1].count - a[1].count)
-    .slice(0, 3);
+    .slice(0, 5);
+
+  // Time-of-Day breakdown data for Recharts
+  // Morning: 5 AM - 12 PM (hours 5-11)
+  // Afternoon: 12 PM - 5 PM (hours 12-16)
+  // Evening/Night: 5 PM - 4 AM (hours 17-23, 0-4)
+  let morningOrdersCount = 0;
+  let morningRevenue = 0;
+  let afternoonOrdersCount = 0;
+  let afternoonRevenue = 0;
+  let eveningOrdersCount = 0;
+  let eveningRevenue = 0;
+
+  const morningItemMap: Record<string, number> = {};
+  const afternoonItemMap: Record<string, number> = {};
+  const eveningItemMap: Record<string, number> = {};
+
+  filteredAnalyticsOrders.forEach((o) => {
+    const hour = new Date(o.createdAt).getHours();
+    o.items.forEach((itemObj) => {
+      const name = itemObj.item.name;
+      if (hour >= 5 && hour < 12) {
+        morningOrdersCount += itemObj.quantity;
+        morningRevenue += itemObj.item.price * itemObj.quantity;
+        morningItemMap[name] = (morningItemMap[name] || 0) + itemObj.quantity;
+      } else if (hour >= 12 && hour < 17) {
+        afternoonOrdersCount += itemObj.quantity;
+        afternoonRevenue += itemObj.item.price * itemObj.quantity;
+        afternoonItemMap[name] = (afternoonItemMap[name] || 0) + itemObj.quantity;
+      } else {
+        eveningOrdersCount += itemObj.quantity;
+        eveningRevenue += itemObj.item.price * itemObj.quantity;
+        eveningItemMap[name] = (eveningItemMap[name] || 0) + itemObj.quantity;
+      }
+    });
+  });
+
+  // Recharts data for time-of-day sales volume & revenue
+  const timeOfDayChartData = [
+    { shift: 'Morning (5AM - 12PM)', orders: morningOrdersCount, revenue: morningRevenue },
+    { shift: 'Afternoon (12PM - 5PM)', orders: afternoonOrdersCount, revenue: afternoonRevenue },
+    { shift: 'Evening/Night (5PM - 4AM)', orders: eveningOrdersCount, revenue: eveningRevenue },
+  ];
+
+  // Top items by shift for comparison chart
+  const topMorningItems = Object.entries(morningItemMap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const topAfternoonItems = Object.entries(afternoonItemMap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+  const topEveningItems = Object.entries(eveningItemMap).sort((a, b) => b[1] - a[1]).slice(0, 4);
+
+  // Combine top items across shifts for a multi-bar chart
+  const allTopItemNames = Array.from(
+    new Set([
+      ...topMorningItems.map(([name]) => name),
+      ...topAfternoonItems.map(([name]) => name),
+      ...topEveningItems.map(([name]) => name),
+    ])
+  ).slice(0, 6);
+
+  const itemShiftComparisonData = allTopItemNames.map((itemName) => ({
+    name: itemName,
+    Morning: morningItemMap[itemName] || 0,
+    Afternoon: afternoonItemMap[itemName] || 0,
+    Evening: eveningItemMap[itemName] || 0,
+  }));
+
+  // Available unique dates for filtering
+  const availableDates = Array.from(
+    new Set(
+      orders.map((o) => new Date(o.createdAt).toISOString().split('T')[0])
+    )
+  ).sort().reverse();
+
+  // Filtered orders for Orders tab
+  const filteredOrders = orders.filter((o) => {
+    const orderDateStr = new Date(o.createdAt).toISOString().split('T')[0];
+    const matchesDate = selectedDateFilter === 'all' || orderDateStr === selectedDateFilter;
+    const matchesStatus = selectedStatusFilter === 'all' || o.status === selectedStatusFilter;
+    return matchesDate && matchesStatus;
+  });
 
   const avgRating =
     feedbacks.length > 0
@@ -228,14 +340,25 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
               <span className="text-[11px] text-[#8C7A70]">Synchronized Demo Platform</span>
             </div>
             <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#261B16]">
-              CaféOS Shift Command
+              CaféOS Shift Command & Analytics Dashboard
             </h2>
             <p className="text-xs sm:text-sm text-[#6B5A50] mt-0.5">
-              Live shift analytics, order history, menu management, and Gemini operational directives.
+              Live Recharts data visualization, date range filters, time-of-day demand analytics, and menu catalog management.
             </p>
           </div>
 
           <div className="flex items-center gap-2">
+            {onRefreshData && (
+              <button
+                type="button"
+                onClick={onRefreshData}
+                className="px-3 py-2.5 bg-[#FAF6F0] hover:bg-[#F0EAE1] text-[#261B16] rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer border border-[#E6DDD4]"
+                title="Refresh Orders & Data"
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-[#C67D3E]" />
+                <span>Sync</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleFetchAiInsight}
@@ -258,11 +381,23 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
         </div>
 
         {/* Manager Sub-tabs */}
-        <div className="flex items-center gap-2 mt-5 pt-4 border-t border-[#F0EAE1]">
+        <div className="flex flex-wrap items-center gap-2 mt-5 pt-4 border-t border-[#F0EAE1]">
+          <button
+            type="button"
+            onClick={() => setActiveTab('analytics')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'analytics'
+                ? 'bg-[#261B16] text-white shadow-xs'
+                : 'text-[#6B5A50] hover:text-[#261B16] bg-[#FAF6F0]'
+            }`}
+          >
+            <TrendingUp className="w-3.5 h-3.5 text-[#C67D3E]" />
+            <span>Analytics Dashboard & Charts</span>
+          </button>
           <button
             type="button"
             onClick={() => setActiveTab('overview')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'overview'
                 ? 'bg-[#261B16] text-white shadow-xs'
                 : 'text-[#6B5A50] hover:text-[#261B16] bg-[#FAF6F0]'
@@ -272,30 +407,275 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
           </button>
           <button
             type="button"
+            onClick={() => setActiveTab('orders')}
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+              activeTab === 'orders'
+                ? 'bg-[#261B16] text-white shadow-xs'
+                : 'text-[#6B5A50] hover:text-[#261B16] bg-[#FAF6F0]'
+            }`}
+          >
+            <span>Orders & Status Filter</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-bold ${activeTab === 'orders' ? 'bg-[#C67D3E] text-white' : 'bg-[#E6DDD4] text-[#261B16]'}`}>
+              {orders.length}
+            </span>
+          </button>
+          <button
+            type="button"
             onClick={() => setActiveTab('menu')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+            className={`px-3.5 py-2 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
               activeTab === 'menu'
                 ? 'bg-[#261B16] text-white shadow-xs'
                 : 'text-[#6B5A50] hover:text-[#261B16] bg-[#FAF6F0]'
             }`}
           >
-            Menu Management ({menuItems.length} items)
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('history')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-              activeTab === 'history'
-                ? 'bg-[#261B16] text-white shadow-xs'
-                : 'text-[#6B5A50] hover:text-[#261B16] bg-[#FAF6F0]'
-            }`}
-          >
-            Full Order History ({orders.length})
+            Menu Management ({menuItems.length})
           </button>
         </div>
       </div>
 
-      {/* TAB 1: OPERATIONS OVERVIEW */}
+      {/* TAB 1: ANALYTICS DASHBOARD & CHARTS (RECHARTS) */}
+      {activeTab === 'analytics' && (
+        <div className="space-y-6">
+          {/* Analytics Header & Date Range Filter Toolbar */}
+          <div className="bg-white rounded-2xl border border-[#E6DDD4] p-4 sm:p-6 shadow-xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div>
+              <h3 className="text-base font-serif font-bold text-[#261B16]">
+                Sales & Time-of-Day Demand Intelligence
+              </h3>
+              <p className="text-xs text-[#6B5A50]">
+                Visualize sales performance and item popularity across morning, afternoon, and evening shifts to optimize stock availability.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 bg-[#FAF6F0] px-3 py-2 rounded-xl border border-[#E0D5CB]">
+              <Calendar className="w-4 h-4 text-[#C67D3E]" />
+              <span className="text-xs font-semibold text-[#8C7A70]">Date Range:</span>
+              <select
+                value={analyticsDateRange}
+                onChange={(e) => setAnalyticsDateRange(e.target.value)}
+                className="bg-transparent text-xs font-bold text-[#261B16] cursor-pointer outline-hidden"
+              >
+                <option value="all">All Time History ({orders.length} orders)</option>
+                <option value="today">Today Only</option>
+                <option value="last7days">Last 7 Days</option>
+                {availableDates.map((d) => (
+                  <option key={d} value={d}>
+                    Date: {d}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* KPI Summary Cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
+            <div className="bg-white rounded-xl border border-[#E6DDD4] p-4 shadow-xs">
+              <div className="flex items-center justify-between text-[#8C7A70] mb-1">
+                <span className="text-xs font-semibold uppercase">Filtered Orders</span>
+                <Coffee className="w-4 h-4 text-[#C67D3E]" />
+              </div>
+              <div className="text-2xl font-serif font-bold text-[#261B16] tabular-nums">
+                {totalOrders}
+              </div>
+              <span className="text-[11px] text-[#8C7A70] mt-1 block">
+                {completedOrders.length} completed
+              </span>
+            </div>
+
+            <div className="bg-white rounded-xl border border-[#E6DDD4] p-4 shadow-xs">
+              <div className="flex items-center justify-between text-[#8C7A70] mb-1">
+                <span className="text-xs font-semibold uppercase">Filtered Revenue</span>
+                <IndianRupee className="w-4 h-4 text-[#C67D3E]" />
+              </div>
+              <div className="text-2xl font-serif font-bold text-[#261B16] tabular-nums">
+                ₹{simulatedGross}
+              </div>
+              <span className="text-[11px] text-[#8C7A70] mt-1 block">
+                Avg Ticket: ₹{avgOrderValue}
+              </span>
+            </div>
+
+            <div className="bg-white rounded-xl border border-[#E6DDD4] p-4 shadow-xs">
+              <div className="flex items-center justify-between text-[#8C7A70] mb-1">
+                <span className="text-xs font-semibold uppercase">Avg Prep Time</span>
+                <Clock className="w-4 h-4 text-[#C67D3E]" />
+              </div>
+              <div className="text-2xl font-serif font-bold text-[#261B16] tabular-nums">
+                {avgPrepMins}m
+              </div>
+              <span className="text-[11px] text-[#4E6B58] mt-1 block font-medium">
+                Kitchen throughput optimal
+              </span>
+            </div>
+
+            <div className="bg-white rounded-xl border border-[#E6DDD4] p-4 shadow-xs">
+              <div className="flex items-center justify-between text-[#8C7A70] mb-1">
+                <span className="text-xs font-semibold uppercase">Customer Rating</span>
+                <Star className="w-4 h-4 text-[#C67D3E]" />
+              </div>
+              <div className="text-2xl font-serif font-bold text-[#261B16] tabular-nums">
+                {avgRating} <span className="text-xs font-normal text-[#8C7A70]">/ 5.0</span>
+              </div>
+              <span className="text-[11px] text-[#4E6B58] mt-1 block font-medium">
+                {repeatCustomerCount} VIP members
+              </span>
+            </div>
+          </div>
+
+          {/* Recharts Visualizations Grid */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            {/* Chart 1: Sales Volume & Revenue by Shift */}
+            <div className="bg-white rounded-2xl border border-[#E6DDD4] p-4 sm:p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-serif font-bold text-[#261B16]">
+                    Shift Volume & Revenue Distribution
+                  </h4>
+                  <p className="text-xs text-[#8C7A70]">Comparing order volume across operating time slots</p>
+                </div>
+                <TrendingUp className="w-4 h-4 text-[#C67D3E]" />
+              </div>
+
+              <div className="h-72 w-full pt-2">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={timeOfDayChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#F0EAE1" />
+                    <XAxis dataKey="shift" tick={{ fontSize: 11, fill: '#6B5A50' }} />
+                    <YAxis tick={{ fontSize: 11, fill: '#6B5A50' }} />
+                    <Tooltip
+                      contentStyle={{ backgroundColor: '#261B16', borderRadius: '12px', color: '#fff', border: 'none' }}
+                      formatter={(value: any, name: any) => [
+                        name === 'revenue' ? `₹${value}` : `${value} units`,
+                        name === 'revenue' ? 'Revenue' : 'Order Count',
+                      ]}
+                    />
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                    <Bar dataKey="orders" name="Orders" fill="#C67D3E" radius={[6, 6, 0, 0]} />
+                    <Bar dataKey="revenue" name="Revenue (₹)" fill="#261B16" radius={[6, 6, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            {/* Chart 2: Top Selling Items Categorized by Time-of-Day Shift */}
+            <div className="bg-white rounded-2xl border border-[#E6DDD4] p-4 sm:p-6 shadow-xs space-y-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-serif font-bold text-[#261B16]">
+                    Item Popularity Across Shifts (Morning vs Afternoon vs Evening)
+                  </h4>
+                  <p className="text-xs text-[#8C7A70]">Most sold items categorized by consumption time</p>
+                </div>
+                <Coffee className="w-4 h-4 text-[#C67D3E]" />
+              </div>
+
+              <div className="h-72 w-full pt-2">
+                {itemShiftComparisonData.length === 0 ? (
+                  <div className="h-full flex items-center justify-center text-xs text-[#8C7A70]">
+                    No order items available for selected filter.
+                  </div>
+                ) : (
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={itemShiftComparisonData} margin={{ top: 10, right: 10, left: -20, bottom: 25 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#F0EAE1" />
+                      <XAxis dataKey="name" tick={{ fontSize: 10, fill: '#6B5A50' }} interval={0} angle={-15} textAnchor="end" />
+                      <YAxis tick={{ fontSize: 11, fill: '#6B5A50' }} />
+                      <Tooltip contentStyle={{ backgroundColor: '#261B16', borderRadius: '12px', color: '#fff', border: 'none' }} />
+                      <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} />
+                      <Bar dataKey="Morning" fill="#D97706" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Afternoon" fill="#F97316" radius={[4, 4, 0, 0]} />
+                      <Bar dataKey="Evening" fill="#4338CA" radius={[4, 4, 0, 0]} />
+                    </BarChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* Shift Details & Availability Recommendations */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {/* Morning Shift */}
+            <div className="bg-white rounded-2xl border border-[#E6DDD4] p-5 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-[#F0EAE1]">
+                <Sunrise className="w-5 h-5 text-amber-600" />
+                <div>
+                  <h4 className="text-xs font-serif font-bold text-[#261B16]">Morning Peak (5AM - 12PM)</h4>
+                  <span className="text-[11px] text-[#8C7A70]">{morningOrdersCount} units sold</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {topMorningItems.length === 0 ? (
+                  <p className="text-xs text-[#8C7A70] italic">No sales recorded.</p>
+                ) : (
+                  topMorningItems.map(([name, count], i) => (
+                    <div key={i} className="flex justify-between text-xs p-2 bg-[#FAF6F0] rounded-lg">
+                      <span className="font-semibold text-[#261B16]">{name}</span>
+                      <span className="text-[#A86226] font-bold">{count} sold</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <p className="text-[11px] text-[#574439] bg-[#FAF6F0] p-2.5 rounded-lg border border-[#EAE2DA]">
+                <span className="font-bold">Recommendation:</span> Pre-grind espresso beans and stage croissants by 7:00 AM.
+              </p>
+            </div>
+
+            {/* Afternoon Shift */}
+            <div className="bg-white rounded-2xl border border-[#E6DDD4] p-5 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-[#F0EAE1]">
+                <Sun className="w-5 h-5 text-orange-500" />
+                <div>
+                  <h4 className="text-xs font-serif font-bold text-[#261B16]">Afternoon Peak (12PM - 5PM)</h4>
+                  <span className="text-[11px] text-[#8C7A70]">{afternoonOrdersCount} units sold</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {topAfternoonItems.length === 0 ? (
+                  <p className="text-xs text-[#8C7A70] italic">No sales recorded.</p>
+                ) : (
+                  topAfternoonItems.map(([name, count], i) => (
+                    <div key={i} className="flex justify-between text-xs p-2 bg-[#FAF6F0] rounded-lg">
+                      <span className="font-semibold text-[#261B16]">{name}</span>
+                      <span className="text-[#A86226] font-bold">{count} sold</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <p className="text-[11px] text-[#574439] bg-[#FAF6F0] p-2.5 rounded-lg border border-[#EAE2DA]">
+                <span className="font-bold">Recommendation:</span> Keep nitro cold brew kegs chilled and verify power strips for deep work zones.
+              </p>
+            </div>
+
+            {/* Evening / Night Shift */}
+            <div className="bg-white rounded-2xl border border-[#E6DDD4] p-5 shadow-xs space-y-3">
+              <div className="flex items-center gap-2 pb-2 border-b border-[#F0EAE1]">
+                <Moon className="w-5 h-5 text-indigo-600" />
+                <div>
+                  <h4 className="text-xs font-serif font-bold text-[#261B16]">Evening/Night Peak (5PM - 4AM)</h4>
+                  <span className="text-[11px] text-[#8C7A70]">{eveningOrdersCount} units sold</span>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                {topEveningItems.length === 0 ? (
+                  <p className="text-xs text-[#8C7A70] italic">No sales recorded.</p>
+                ) : (
+                  topEveningItems.map(([name, count], i) => (
+                    <div key={i} className="flex justify-between text-xs p-2 bg-[#FAF6F0] rounded-lg">
+                      <span className="font-semibold text-[#261B16]">{name}</span>
+                      <span className="text-[#A86226] font-bold">{count} sold</span>
+                    </div>
+                  ))
+                )}
+              </div>
+              <p className="text-[11px] text-[#574439] bg-[#FAF6F0] p-2.5 rounded-lg border border-[#EAE2DA]">
+                <span className="font-bold">Recommendation:</span> Stock calming chamomile teas and dark chocolate pastries for lounge relaxation.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 2: OPERATIONS OVERVIEW */}
       {activeTab === 'overview' && (
         <div className="space-y-6">
           {/* Key Metrics Cards (Grid) */}
@@ -387,14 +767,14 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
                     🔍 Observed Trends & Flow:
                   </span>
                   <p className="text-xs text-[#574439] leading-relaxed">
-                    {insight.customerTrend || 'Steady demand for espresso and light pastries.'}
+                    {insight.customerTrend || 'High afternoon preference for iced single-origin and vegan pastries.'}
                   </p>
                 </div>
               </div>
             </div>
           )}
 
-          {/* Popular Items & Floor Velocity */}
+          {/* Popular Items Preview */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="bg-white rounded-xl border border-[#E6DDD4] p-4 shadow-xs">
               <h4 className="text-sm font-serif font-bold text-[#261B16] mb-3 flex items-center justify-between">
@@ -408,7 +788,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
                   topDrinks.map(([name, data], i) => (
                     <div key={i} className="flex items-center justify-between text-xs p-2 bg-[#FAF6F0] rounded-lg">
                       <span className="font-semibold text-[#261B16]">{name}</span>
-                      <span className="text-[#A86226] font-bold tabular-nums">{data.count} ordered</span>
+                      <span className="text-[#A86226] font-bold tabular-nums">{data.count} ordered (₹{data.revenue})</span>
                     </div>
                   ))
                 )}
@@ -427,7 +807,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
                   topSnacks.map(([name, data], i) => (
                     <div key={i} className="flex items-center justify-between text-xs p-2 bg-[#FAF6F0] rounded-lg">
                       <span className="font-semibold text-[#261B16]">{name}</span>
-                      <span className="text-[#A86226] font-bold tabular-nums">{data.count} ordered</span>
+                      <span className="text-[#A86226] font-bold tabular-nums">{data.count} ordered (₹{data.revenue})</span>
                     </div>
                   ))
                 )}
@@ -437,7 +817,126 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
         </div>
       )}
 
-      {/* TAB 2: MENU MANAGEMENT */}
+      {/* TAB 3: SEPARATE ORDERS STATUS & DATE-WISE FILTER */}
+      {activeTab === 'orders' && (
+        <div className="bg-white rounded-2xl border border-[#E6DDD4] p-4 sm:p-6 shadow-xs space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#F0EAE1]">
+            <div>
+              <h3 className="text-lg font-serif font-bold text-[#261B16]">
+                Orders Status & Date-Wise Audit Log
+              </h3>
+              <p className="text-xs text-[#6B5A50]">
+                Filter customer orders by specific dates and real-time status to audit floor activity and kitchen throughput.
+              </p>
+            </div>
+
+            {/* Filter controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-[#FAF6F0] px-3 py-1.5 rounded-xl border border-[#E0D5CB]">
+                <Calendar className="w-3.5 h-3.5 text-[#C67D3E]" />
+                <span className="text-xs text-[#8C7A70]">Date:</span>
+                <select
+                  value={selectedDateFilter}
+                  onChange={(e) => setSelectedDateFilter(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-[#261B16] cursor-pointer outline-hidden"
+                >
+                  <option value="all">All Dates ({orders.length})</option>
+                  {availableDates.map((dateStr) => (
+                    <option key={dateStr} value={dateStr}>
+                      {dateStr}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="flex items-center gap-1.5 bg-[#FAF6F0] px-3 py-1.5 rounded-xl border border-[#E0D5CB]">
+                <Filter className="w-3.5 h-3.5 text-[#C67D3E]" />
+                <span className="text-xs text-[#8C7A70]">Status:</span>
+                <select
+                  value={selectedStatusFilter}
+                  onChange={(e) => setSelectedStatusFilter(e.target.value)}
+                  className="bg-transparent text-xs font-semibold text-[#261B16] cursor-pointer outline-hidden capitalize"
+                >
+                  <option value="all">All Statuses</option>
+                  <option value="new">New</option>
+                  <option value="preparing">Preparing</option>
+                  <option value="ready">Ready</option>
+                  <option value="completed">Completed</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-[#EAE2DA] text-[#8C7A70] font-semibold">
+                  <th className="py-2.5 px-3">Token</th>
+                  <th className="py-2.5 px-3">Customer & Member ID</th>
+                  <th className="py-2.5 px-3">Zone / Table</th>
+                  <th className="py-2.5 px-3">Items Ordered</th>
+                  <th className="py-2.5 px-3">Total (₹)</th>
+                  <th className="py-2.5 px-3">Status</th>
+                  <th className="py-2.5 px-3">Timestamp / Time</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[#F0EAE1]">
+                {filteredOrders.length === 0 ? (
+                  <tr>
+                    <td colSpan={7} className="py-8 text-center text-[#8C7A70]">
+                      No orders match the selected date or status filter.
+                    </td>
+                  </tr>
+                ) : (
+                  filteredOrders.map((o) => (
+                    <tr key={o.id} className="hover:bg-[#FAF6F0]/60">
+                      <td className="py-3 px-3 font-bold text-[#261B16] tabular-nums">
+                        {o.tokenNumber}
+                      </td>
+                      <td className="py-3 px-3 text-[#574439]">
+                        <span className="font-semibold block">{o.customerName}</span>
+                        {o.membershipCode && (
+                          <span className="text-[10px] text-[#A86226] font-mono">{o.membershipCode}</span>
+                        )}
+                      </td>
+                      <td className="py-3 px-3 text-[#574439]">
+                        {o.tableNumber ? `Table ${o.tableNumber}` : o.zone}
+                      </td>
+                      <td className="py-3 px-3 text-[#6B5A50] max-w-xs">
+                        {o.items.map((i) => `${i.quantity}x ${i.item.name}`).join(', ')}
+                      </td>
+                      <td className="py-3 px-3 font-semibold text-[#261B16] tabular-nums">
+                        ₹{o.totalAmount}
+                      </td>
+                      <td className="py-3 px-3">
+                        <span
+                          className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase ${
+                            o.status === 'completed'
+                              ? 'bg-zinc-100 text-zinc-700'
+                              : o.status === 'ready'
+                              ? 'bg-blue-100 text-blue-800'
+                              : o.status === 'preparing'
+                              ? 'bg-amber-100 text-amber-800'
+                              : 'bg-emerald-100 text-emerald-800'
+                          }`}
+                        >
+                          {o.status}
+                        </span>
+                      </td>
+                      <td className="py-3 px-3 text-[#8C7A70] tabular-nums">
+                        <div>{new Date(o.createdAt).toLocaleDateString()}</div>
+                        <div className="text-[10px]">{new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 4: MENU MANAGEMENT */}
       {activeTab === 'menu' && (
         <div className="bg-white rounded-2xl border border-[#E6DDD4] p-4 sm:p-6 shadow-xs space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -493,7 +992,7 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
                         onClick={() =>
                           onUpdateMenuItem(item.id, { available: item.available === false ? true : false })
                         }
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold cursor-pointer ${
+                        className={`px-2.5 py-1 rounded-full text-[10px] font-bold cursor-pointer ${
                           item.available !== false
                             ? 'bg-emerald-100 text-emerald-800'
                             : 'bg-red-100 text-red-800'
@@ -519,73 +1018,6 @@ export const ManagerView: React.FC<ManagerViewProps> = ({
                       >
                         <Trash2 className="w-3.5 h-3.5 inline" />
                       </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* TAB 3: FULL ORDER HISTORY */}
-      {activeTab === 'history' && (
-        <div className="bg-white rounded-2xl border border-[#E6DDD4] p-4 sm:p-6 shadow-xs space-y-4">
-          <h3 className="text-base font-serif font-bold text-[#261B16]">
-            Complete Orders Audit Log
-          </h3>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead>
-                <tr className="border-b border-[#EAE2DA] text-[#8C7A70] font-semibold">
-                  <th className="py-2.5 px-3">Token</th>
-                  <th className="py-2.5 px-3">Customer</th>
-                  <th className="py-2.5 px-3">Location</th>
-                  <th className="py-2.5 px-3">Items Ordered</th>
-                  <th className="py-2.5 px-3">Total</th>
-                  <th className="py-2.5 px-3">Status</th>
-                  <th className="py-2.5 px-3">Time</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#F0EAE1]">
-                {orders.map((o) => (
-                  <tr key={o.id} className="hover:bg-[#FAF6F0]/60">
-                    <td className="py-2.5 px-3 font-bold text-[#261B16] tabular-nums">
-                      {o.tokenNumber}
-                    </td>
-                    <td className="py-2.5 px-3 text-[#574439]">
-                      {o.customerName}
-                      {o.membershipCode && (
-                        <span className="text-[10px] text-[#A86226] block">{o.membershipCode}</span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 text-[#574439]">
-                      {o.tableNumber ? `${o.tableNumber}` : o.zone}
-                    </td>
-                    <td className="py-2.5 px-3 text-[#6B5A50]">
-                      {o.items.map((i) => `${i.quantity}x ${i.item.name}`).join(', ')}
-                    </td>
-                    <td className="py-2.5 px-3 font-semibold text-[#261B16] tabular-nums">
-                      ₹{o.totalAmount}
-                    </td>
-                    <td className="py-2.5 px-3">
-                      <span
-                        className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                          o.status === 'completed'
-                            ? 'bg-zinc-100 text-zinc-700'
-                            : o.status === 'ready'
-                            ? 'bg-blue-100 text-blue-800'
-                            : o.status === 'preparing'
-                            ? 'bg-amber-100 text-amber-800'
-                            : 'bg-emerald-100 text-emerald-800'
-                        }`}
-                      >
-                        {o.status}
-                      </span>
-                    </td>
-                    <td className="py-2.5 px-3 text-[#8C7A70] tabular-nums">
-                      {new Date(o.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                     </td>
                   </tr>
                 ))}

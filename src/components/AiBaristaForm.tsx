@@ -9,6 +9,7 @@ interface AiBaristaFormProps {
   isLoading: boolean;
   error: string | null;
   onRetry: () => void;
+  streamingText?: string;
 }
 
 export const AiBaristaForm: React.FC<AiBaristaFormProps> = ({
@@ -18,6 +19,7 @@ export const AiBaristaForm: React.FC<AiBaristaFormProps> = ({
   isLoading,
   error,
   onRetry,
+  streamingText,
 }) => {
   const updatePreference = <K extends keyof UserPreferences>(key: K, value: UserPreferences[K]) => {
     setPreferences((prev) => ({ ...prev, [key]: value }));
@@ -181,7 +183,7 @@ export const AiBaristaForm: React.FC<AiBaristaFormProps> = ({
           {isLoading ? (
             <>
               <RefreshCw className="w-4 h-4 animate-spin text-white" />
-              <span>AI Barista is crafting your pairing...</span>
+              <span>{streamingText || 'AI Barista is crafting your pairing...'}</span>
             </>
           ) : (
             <>
@@ -190,8 +192,11 @@ export const AiBaristaForm: React.FC<AiBaristaFormProps> = ({
             </>
           )}
         </button>
-        <p className="text-[11px] text-center text-[#8C7A70] mt-2">
-          Powered by Google Gemini AI · Real-time vibe analysis, dietary matchmaking & wait time estimation
+        <p className="text-[11px] text-center text-[#8C7A70] mt-2 flex items-center justify-center gap-1.5 flex-wrap">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#52796F] animate-pulse"></span>
+          <span className="font-medium text-[#6B5A50]">Intelligent Café Concierge</span>
+          <span aria-hidden="true">·</span>
+          <span>Real-time vibe analysis, dietary matchmaking & wait time estimation</span>
         </p>
       </div>
     </div>

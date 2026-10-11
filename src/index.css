@@ -28,3 +28,43 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #BFAEA0;
 }
+
+/* Vibe Map Container Occupancy Badges & Indicators Styling */
+#vibe-map-container {
+  display: flex;
+  flex-direction: column;
+}
+
+#vibe-map-container svg {
+  width: 100%;
+  height: auto;
+  max-height: 520px;
+}
+
+#vibe-map-container .occupancy-indicator-circle {
+  transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1), filter 0.3s ease;
+  transform-box: fill-box;
+  transform-origin: center;
+  cursor: pointer;
+}
+
+#vibe-map-container .occupancy-indicator-circle:hover {
+  transform: scale(1.4);
+  filter: drop-shadow(0 0 6px rgba(198, 125, 62, 0.75));
+}
+
+@keyframes badge-pulse-scale {
+  0%, 100% {
+    transform: scale(1);
+    opacity: 0.95;
+  }
+  50% {
+    transform: scale(1.18);
+    opacity: 1;
+  }
+}
+
+#vibe-map-container .occupancy-indicator-circle {
+  animation: badge-pulse-scale 2.5s infinite ease-in-out;
+}
+

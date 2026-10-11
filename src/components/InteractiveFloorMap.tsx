@@ -24,8 +24,17 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
     return { bg: 'bg-rose-500', text: 'text-rose-700', border: 'border-rose-300', badge: 'Nearly Full' };
   };
 
+  const getZoneStatusColor = (zoneName: string) => {
+    const data = occupancyData[zoneName];
+    if (!data) return '#10B981';
+    const ratio = data.occupiedSeats / data.totalSeats;
+    if (ratio < 0.5) return '#10B981';
+    if (ratio < 0.8) return '#F59E0B';
+    return '#EF4444';
+  };
+
   return (
-    <div className="bg-white rounded-2xl border border-[#E6DDD4] overflow-hidden shadow-xs">
+    <div id="vibe-map-container" className="bg-white rounded-2xl border border-[#E6DDD4] overflow-hidden shadow-xs">
       {/* Top Header */}
       <div className="p-4 sm:p-5 bg-[#FAF6F0] border-b border-[#E6DDD4] flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
@@ -59,9 +68,10 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
 
       <div className="p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
         {/* Left 2 Cols: Responsive Architectural SVG Map */}
-        <div className="lg:col-span-2 bg-[#FBF8F3] rounded-xl border border-[#EAE2DA] p-3 sm:p-5 overflow-hidden">
+        <div className="lg:col-span-2 bg-[#FBF8F3] rounded-xl border border-[#EAE2DA] p-3 sm:p-5 overflow-hidden flex items-center justify-center">
           <svg
             viewBox="0 0 800 520"
+            preserveAspectRatio="xMidYMid meet"
             className="w-full h-auto max-h-[480px] select-none"
             style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.02))' }}
           >
@@ -113,7 +123,7 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
             {/* ZONE 1: FOCUS CORNER (Top Left) */}
             <g
               onClick={() => onSelectZone('Focus Corner')}
-              className="cursor-pointer transition-transform hover:opacity-95"
+              className="cursor-pointer transition-transform duration-300 hover:scale-[1.01] origin-center hover:opacity-95"
             >
               <rect
                 x="35"
@@ -139,19 +149,19 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
               <rect x="195" y="145" width="110" height="35" rx="4" fill="#EAE2DA" stroke="#D5C6B7" />
               <rect x="235" y="185" width="30" height="15" rx="3" fill="#8C7A70" />
 
-              <text x="50" y="55" fill="#261B16" fontSize="13" fontFamily="serif" fontWeight="bold">
+              <text x="55" y="55" fill="#261B16" fontSize="13" fontFamily="serif" fontWeight="bold">
                 Focus Corner
               </text>
-              <circle cx="325" cy="52" r="5" fill="#10B981" />
-              <text x="250" y="55" fill="#6B5A50" fontSize="10" fontWeight="600">
+              <text x="210" y="55" fill="#6B5A50" fontSize="10" fontWeight="600">
                 40 dB · Deep Work
               </text>
+              <circle cx="328" cy="52" r="5" fill={getZoneStatusColor('Focus Corner')} />
             </g>
 
             {/* ZONE 2: SOCIAL TABLE (Top Right) */}
             <g
               onClick={() => onSelectZone('Social Table')}
-              className="cursor-pointer transition-transform hover:opacity-95"
+              className="cursor-pointer transition-transform duration-300 hover:scale-[1.01] origin-center hover:opacity-95"
             >
               <rect
                 x="380"
@@ -177,19 +187,19 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
                 <rect key={`chair-bot-${cx}`} x={cx - 15} y="177" width="30" height="16" rx="4" fill="#8C7A70" />
               ))}
 
-              <text x="395" y="55" fill="#261B16" fontSize="13" fontFamily="serif" fontWeight="bold">
+              <text x="400" y="55" fill="#261B16" fontSize="13" fontFamily="serif" fontWeight="bold">
                 Social Table
               </text>
-              <circle cx="745" cy="52" r="5" fill="#F59E0B" />
-              <text x="660" y="55" fill="#6B5A50" fontSize="10" fontWeight="600">
+              <text x="610" y="55" fill="#6B5A50" fontSize="10" fontWeight="600">
                 65 dB · Collab & Chats
               </text>
+              <circle cx="748" cy="52" r="5" fill={getZoneStatusColor('Social Table')} />
             </g>
 
             {/* ZONE 3: COZY LOUNGE (Bottom Left) */}
             <g
               onClick={() => onSelectZone('Cozy Lounge')}
-              className="cursor-pointer transition-transform hover:opacity-95"
+              className="cursor-pointer transition-transform duration-300 hover:scale-[1.01] origin-center hover:opacity-95"
             >
               <rect
                 x="35"
@@ -221,19 +231,19 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
                 Bookshelf
               </text>
 
-              <text x="50" y="315" fill="#261B16" fontSize="13" fontFamily="serif" fontWeight="bold">
+              <text x="55" y="278" fill="#261B16" fontSize="13" fontFamily="serif" fontWeight="bold">
                 Cozy Lounge
               </text>
-              <circle cx="325" cy="275" r="5" fill="#10B981" />
-              <text x="250" y="277" fill="#6B5A50" fontSize="10" fontWeight="600">
+              <text x="210" y="278" fill="#6B5A50" fontSize="10" fontWeight="600">
                 50 dB · Unwind
               </text>
+              <circle cx="328" cy="275" r="5" fill={getZoneStatusColor('Cozy Lounge')} />
             </g>
 
             {/* ZONE 4: BARISTA TASTING BENCH (Front of Bar) */}
             <g
               onClick={() => onSelectZone('Barista Tasting Bench')}
-              className="cursor-pointer transition-transform hover:opacity-95"
+              className="cursor-pointer transition-transform duration-300 hover:scale-[1.01] origin-center hover:opacity-95"
             >
               <rect
                 x="370"
@@ -252,9 +262,10 @@ export const InteractiveFloorMap: React.FC<InteractiveFloorMapProps> = ({
               <text x="417" y="350" textAnchor="middle" fill="#261B16" fontSize="11" fontFamily="serif" fontWeight="bold">
                 Bench
               </text>
-              {/* 3 Stools */}
-              <circle cx="417" cy="375" r="12" fill="#C67D3E" stroke="#A86226" strokeWidth="2" />
-              <circle cx="417" cy="405" r="12" fill="#C67D3E" stroke="#A86226" strokeWidth="2" />
+              {/* 2 Stools & Status Indicator */}
+              <circle cx="417" cy="375" r="10" fill="#C67D3E" stroke="#A86226" strokeWidth="2" />
+              <circle cx="417" cy="405" r="10" fill="#C67D3E" stroke="#A86226" strokeWidth="2" />
+              <circle cx="448" cy="325" r="5" fill={getZoneStatusColor('Barista Tasting Bench')} />
             </g>
           </svg>
         </div>

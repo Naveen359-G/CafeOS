@@ -17,7 +17,9 @@ import { CheckoutModal } from './components/CheckoutModal';
 import { OrderTrackerModal } from './components/OrderTrackerModal';
 import { CafePulse } from './components/CafePulse';
 import { LiveOrderBanner } from './components/LiveOrderBanner';
+import { AiProductReviewsSpotlight } from './components/AiProductReviewsSpotlight';
 import { playStatusChime } from './utils/audioChime';
+import { useOrderStatusPolling } from './hooks/useOrderStatusPolling';
 import {
   VisitIntent,
   UserPreferences,
@@ -166,14 +168,14 @@ export default function App() {
   // AI Recommendation State
   const [recommendation, setRecommendation] = useState<RecommendationResult | null>(null);
   const [isLoadingRec, setIsLoadingRec] = useState<boolean>(false);
+  const [streamingRecText, setStreamingRecText] = useState<string>('');
   const [recError, setRecError] = useState<string | null>(null);
   const [addedPairing, setAddedPairing] = useState<boolean>(false);
 
   // Dynamic Menu Items (synced with server)
   const [menuItems, setMenuItems] = useState<MenuItem[]>(ALL_MENU_ITEMS);
 
-  // Shared Orders State (synced with backend /api/orders)
-  const [orders, setOrders] = useState<DemoOrder[]>([]);
+  // Shared Orders State & polling hook managed below
 
   // Floor Map Occupancy Data
   const [occupancyData, setOccupancyData] = useState<Record<string, ZoneOccupancy>>({
@@ -258,32 +260,24 @@ export default function App() {
   const [isTrackerOpen, setIsTrackerOpen] = useState(false);
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
 
-  // Customer active order tracking across role switching & real-time notifications
+  // Customer active order tracking & real-time order status polling hook
   const [trackedOrderId, setTrackedOrderId] = useState<string | null>(() => {
-    return localStorage.getItem('cafeos_tracked_order_id');
+    try {
+      return localStorage.getItem('cafeos_tracked_order_id');
+    } catch {
+      return null;
+    }
   });
-  const [lastReportedStatus, setLastReportedStatus] = useState<OrderStatus | null>(() => {
-    return (localStorage.getItem('cafeos_last_reported_status') as OrderStatus) || null;
-  });
-  const [statusNotification, setStatusNotification] = useState<string | null>(null);
   const prevRoleRef = useRef<ActiveRole>(activeRole);
 
-  // Trigger live order status update alert and sound chime
-  const triggerStatusUpdateNotification = useCallback((ord: DemoOrder) => {
-    setLastReportedStatus(ord.status);
-    localStorage.setItem('cafeos_last_reported_status', ord.status);
-
-    if (ord.status === 'preparing') {
-      playStatusChime('preparing');
-      setStatusNotification(`☕ Kitchen Update: Chef is now preparing your order (${ord.tokenNumber})! Fresh brew in progress.`);
-    } else if (ord.status === 'ready') {
-      playStatusChime('ready');
-      setStatusNotification(`🎉 Order Ready: Order ${ord.tokenNumber} is ready for collection at ${ord.tableNumber || 'the counter'}!`);
-    } else if (ord.status === 'completed') {
-      playStatusChime('completed');
-      setStatusNotification(`✨ Order Complete: Order ${ord.tokenNumber} has been served. Enjoy your visit!`);
-    }
-  }, []);
+  const {
+    orders,
+    setOrders,
+    fetchOrders,
+    statusNotification,
+    setStatusNotification,
+    lastReportedStatus,
+  } = useOrderStatusPolling(activeRole, trackedOrderId);
 
   // Load customer account from browser storage (keyed by customerId or name)
   const loadCustomerAccount = useCallback((name: string, membershipCode?: string): LoyaltyProfile => {
@@ -379,18 +373,7 @@ export default function App() {
     }
   }, [isAdminLoggedIn, isChefLoggedIn]);
 
-  // Sync Orders with Server
-  const fetchOrders = useCallback(async () => {
-    try {
-      const res = await fetch('/api/orders');
-      if (res.ok) {
-        const data = await res.json();
-        setOrders(data.orders || []);
-      }
-    } catch (e) {
-      console.warn('Orders sync error:', e);
-    }
-  }, []);
+  // fetchOrders is provided by useOrderStatusPolling hook above
 
   // Sync Menu with Server
   const fetchMenu = useCallback(async () => {
@@ -433,20 +416,18 @@ export default function App() {
     }
   }, []);
 
-  // Polling hook every 3.5s for live KDS & Customer order synchronization
+  // Polling hook every 3.5s for occupancy and auxiliary sync
   useEffect(() => {
-    fetchOrders();
     fetchMenu();
     fetchOccupancy();
     fetchFeedbacks();
 
     const interval = setInterval(() => {
-      fetchOrders();
       fetchOccupancy();
     }, 3500);
 
     return () => clearInterval(interval);
-  }, [fetchOrders, fetchMenu, fetchOccupancy, fetchFeedbacks]);
+  }, [fetchMenu, fetchOccupancy, fetchFeedbacks]);
 
   // Persist LocalStorage items
   useEffect(() => {
@@ -559,39 +540,20 @@ export default function App() {
     setActiveRole(role);
     prevRoleRef.current = prevRole;
 
-    // When switching back to customer from chef or admin, check order status immediately!
-    if (role === 'customer' && prevRole !== 'customer') {
-      if (trackedOrderId) {
-        const curOrder = orders.find((o) => o.id === trackedOrderId);
-        if (curOrder) {
-          if (lastReportedStatus && curOrder.status !== lastReportedStatus) {
-            triggerStatusUpdateNotification(curOrder);
-          } else if (curOrder.status === 'preparing') {
-            playStatusChime('preparing');
-            setStatusNotification(`☕ Live Status: Chef is preparing your order (${curOrder.tokenNumber}).`);
-          } else if (curOrder.status === 'ready') {
-            playStatusChime('ready');
-            setStatusNotification(`🎉 Live Status: Order ${curOrder.tokenNumber} is READY for collection!`);
-          }
+    // When switching back to customer from chef or admin, check status
+    if (role === 'customer' && prevRole !== 'customer' && trackedOrderId) {
+      const curOrder = orders.find((o) => o.id === trackedOrderId);
+      if (curOrder) {
+        if (curOrder.status === 'preparing') {
+          playStatusChime('preparing');
+          setStatusNotification(`☕ Live Status: Chef is preparing your order (${curOrder.tokenNumber}).`);
+        } else if (curOrder.status === 'ready') {
+          playStatusChime('ready');
+          setStatusNotification(`🎉 In-App Toast: Order ${curOrder.tokenNumber} is READY for collection!`);
         }
       }
     }
   };
-
-  // Real-time order status monitor for customer role
-  useEffect(() => {
-    if (activeRole === 'customer' && trackedOrderId && orders.length > 0) {
-      const curOrder = orders.find((o) => o.id === trackedOrderId);
-      if (curOrder) {
-        if (!lastReportedStatus) {
-          setLastReportedStatus(curOrder.status);
-          localStorage.setItem('cafeos_last_reported_status', curOrder.status);
-        } else if (curOrder.status !== lastReportedStatus) {
-          triggerStatusUpdateNotification(curOrder);
-        }
-      }
-    }
-  }, [orders, activeRole, trackedOrderId, lastReportedStatus, triggerStatusUpdateNotification]);
 
   const handleLoginSuccess = (role: 'admin' | 'chef') => {
     if (role === 'admin') {
@@ -616,9 +578,10 @@ export default function App() {
     setActiveRole('customer');
   };
 
-  // Trigger Gemini AI Barista Recommendation
+  // Trigger Gemini AI Barista Recommendation with streaming response support
   const handleGenerateRecommendation = async () => {
     setIsLoadingRec(true);
+    setStreamingRecText('Connecting to Barista Sommelier (Streaming AI)...');
     setRecError(null);
     setAddedPairing(false);
 
@@ -647,10 +610,55 @@ export default function App() {
         throw new Error(`Server returned HTTP ${response.status}`);
       }
 
-      const data = await response.json();
-      setRecommendation(data);
-      if (data.suggestedZone) {
-        setSelectedFloorZone(data.suggestedZone);
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('text/event-stream') && response.body) {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let finalRecData: any = null;
+
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n\n');
+          buffer = lines.pop() || '';
+
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              try {
+                const json = JSON.parse(line.slice(6));
+                if (json.fullText) {
+                  setStreamingRecText(`Crafting pairing: ${json.fullText.slice(0, 110)}...`);
+                }
+                if (json.done && json.result) {
+                  finalRecData = json.result;
+                }
+              } catch (e) {
+                // Ignore parse errors on partial chunks
+              }
+            }
+          }
+        }
+
+        if (finalRecData) {
+          setRecommendation(finalRecData);
+          if (finalRecData.suggestedZone) {
+            setSelectedFloorZone(finalRecData.suggestedZone);
+          }
+        } else {
+          const data = await response.json();
+          setRecommendation(data);
+          if (data.suggestedZone) {
+            setSelectedFloorZone(data.suggestedZone);
+          }
+        }
+      } else {
+        const data = await response.json();
+        setRecommendation(data);
+        if (data.suggestedZone) {
+          setSelectedFloorZone(data.suggestedZone);
+        }
       }
 
       // Record activity towards badges
@@ -672,6 +680,7 @@ export default function App() {
       setRecError(err.message || 'Could not connect to Barista API');
     } finally {
       setIsLoadingRec(false);
+      setStreamingRecText('');
     }
   };
 
@@ -783,9 +792,7 @@ export default function App() {
 
         // Track order for live notifications & role switching
         setTrackedOrderId(createdOrder.id);
-        setLastReportedStatus(createdOrder.status);
         localStorage.setItem('cafeos_tracked_order_id', createdOrder.id);
-        localStorage.setItem('cafeos_last_reported_status', createdOrder.status);
         setStatusNotification(`✓ Order ${createdOrder.tokenNumber} placed! Sent directly to Kitchen Display.`);
 
         // Digital check-in and stamp award under individual customer ID in browser storage
@@ -1025,6 +1032,7 @@ export default function App() {
                     isLoading={isLoadingRec}
                     error={recError}
                     onRetry={handleGenerateRecommendation}
+                    streamingText={streamingRecText}
                   />
                 </div>
 
@@ -1038,6 +1046,9 @@ export default function App() {
                     />
                   </div>
                 )}
+
+                {/* AI Product Reviews & Guest Sentiment Spotlight */}
+                <AiProductReviewsSpotlight feedbacks={feedbacks} />
               </div>
             )}
 
@@ -1191,20 +1202,36 @@ export default function App() {
 
       {/* Footer */}
       <footer className="mt-12 border-t border-[#E6DDD4] bg-[#F4EFEA] py-8 text-xs text-[#6B5A50]">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
-          <div>
-            <span className="font-serif font-bold text-[#261B16] text-sm">CaféOS AI</span>
-            <span className="mx-2 text-[#C6B8AC]">·</span>
-            <span>Your Café. Your Vibe.</span>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row items-center justify-between gap-6 text-center md:text-left">
+          <div className="flex flex-col items-center md:items-start gap-1">
+            <div>
+              <span className="font-serif font-bold text-[#261B16] text-sm">CaféOS AI</span>
+              <span className="mx-2 text-[#C6B8AC]">·</span>
+              <span>Your Café. Your Vibe.</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4 text-[#8C7A70] flex-wrap">
-            <span>Customer-to-Kitchen-to-Manager Connected Platform</span>
-            <span aria-hidden="true">·</span>
-            <span>Google Cloud Hackathon 2026</span>
-            <span aria-hidden="true">·</span>
-            <span>Gemini 3.8 Flash SDK</span>
+          <div className="font-medium text-[#6B5A50] text-xs">
+            Google Cloud Hackathon 2026
           </div>
+
+          <div className="flex flex-col items-center md:items-end gap-1 text-[11px] text-[#8C7A70]">
+            <div>
+              Built by{' '}
+              <a
+                href="https://www.linkedin.com/in/naveeng359/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-semibold text-[#261B16] hover:underline"
+              >
+                Naveen Kumar Gajavelli
+              </a>
+              .
+            </div>
+          </div>
+        </div>
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 mt-6 pt-4 border-t border-[#EAE2D8] text-center text-[11px] text-[#8C7A70]">
+          All rights reserved - CaféOS AI @2026
         </div>
       </footer>
     </div>

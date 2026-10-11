@@ -1,6 +1,6 @@
 {
   "name": "CaféOS AI",
-  "description": "Your Café. Your Vibe. An intent-aware AI café companion that personalizes specialty coffee, artisanal food pairings, seating zones, and wait times.",
+  "description": "From personalized AI recommendations to smart seating, kitchen workflows, and real-time café insights. One connected experience for customers and café teams.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
