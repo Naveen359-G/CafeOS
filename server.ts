@@ -13,21 +13,39 @@ const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 const isProd = process.env.NODE_ENV === 'production';
 
+// Handle serverless pre-parsed body safely before express.json()
+app.use((req, _res, next) => {
+  if (req.body && typeof req.body === 'object') {
+    (req as any)._body = true;
+  }
+  next();
+});
 app.use(express.json());
 
-// Initialize Google Gen AI
-const apiKey = process.env.GEMINI_API_KEY;
-let ai: GoogleGenAI | null = null;
-if (apiKey) {
-  ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
+// Initialize Google Gen AI with flexible environment variable support
+export function getGeminiClient(): GoogleGenAI | null {
+  const rawKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_API_KEY ||
+    process.env.GOOGLE_GENAI_API_KEY ||
+    process.env.VITE_GEMINI_API_KEY ||
+    process.env.API_KEY ||
+    '';
+  const apiKey = rawKey.trim().replace(/^["']|["']$/g, '').replace(/\\n/g, '').trim();
+  if (!apiKey) return null;
+
+  try {
+    return new GoogleGenAI({
+      apiKey,
+    });
+  } catch (err) {
+    console.error('Failed to instantiate GoogleGenAI client:', err);
+    return null;
+  }
 }
+
+// Global cached client if initialized at startup
+const ai = getGeminiClient();
 
 // -------------------------------------------------------------
 // IN-MEMORY SHARED DATA STORE (Kitchen, Customer & Manager Sync)
@@ -461,7 +479,7 @@ function generateCuratedFallback(intent: string, drinkType: string, temperature:
 // -------------------------------------------------------------
 
 // 1. Auth Endpoint for Demo Roles (/admin and /chef)
-app.post('/api/auth/login', (req, res) => {
+app.post(['/api/auth/login', '/auth/login'], (req, res) => {
   const { role, loginId, password } = req.body;
 
   if (role === 'admin') {
@@ -482,11 +500,11 @@ app.post('/api/auth/login', (req, res) => {
 });
 
 // 2. Orders API (Shared for Customer, Kitchen KDS & Manager)
-app.get('/api/orders', (_req, res) => {
+app.get(['/api/orders', '/orders'], (_req, res) => {
   res.json({ orders: ORDERS });
 });
 
-app.post('/api/orders', (req, res) => {
+app.post(['/api/orders', '/orders'], (req, res) => {
   const { customerName, tableNumber, membershipCode, items, specialInstructions, zone, paymentMethod } = req.body;
 
   if (!items || !items.length) {
@@ -518,7 +536,7 @@ app.post('/api/orders', (req, res) => {
   res.status(201).json({ order: newOrder });
 });
 
-app.patch('/api/orders/:id/status', (req, res) => {
+app.patch(['/api/orders/:id/status', '/orders/:id/status'], (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
 
@@ -542,7 +560,7 @@ app.patch('/api/orders/:id/status', (req, res) => {
   res.json({ order });
 });
 
-app.patch('/api/orders/:id/threshold', (req, res) => {
+app.patch(['/api/orders/:id/threshold', '/orders/:id/threshold'], (req, res) => {
   const { id } = req.params;
   const { minutes } = req.body;
 
@@ -557,7 +575,7 @@ app.patch('/api/orders/:id/threshold', (req, res) => {
 });
 
 // 3. Dynamic Menu API (Customer browse + Manager CRUD)
-app.get('/api/menu', (_req, res) => {
+app.get(['/api/menu', '/menu'], (_req, res) => {
   res.json({
     drinks: DYNAMIC_MENU.filter((m) => m.category === 'drink'),
     snacks: DYNAMIC_MENU.filter((m) => m.category === 'snack'),
@@ -565,7 +583,7 @@ app.get('/api/menu', (_req, res) => {
   });
 });
 
-app.post('/api/menu', (req, res) => {
+app.post(['/api/menu', '/menu'], (req, res) => {
   const { name, category, price, description, type, temperature, dietaryTags, vibeTag, caffeineLevel, imageUrl } = req.body;
   if (!name || !price || !category) {
     return res.status(400).json({ error: 'Missing required menu fields' });
@@ -591,7 +609,7 @@ app.post('/api/menu', (req, res) => {
   res.status(201).json({ item: newItem });
 });
 
-app.put('/api/menu/:id', (req, res) => {
+app.put(['/api/menu/:id', '/menu/:id'], (req, res) => {
   const { id } = req.params;
   const itemIndex = DYNAMIC_MENU.findIndex((m) => m.id === id);
   if (itemIndex === -1) {
@@ -607,7 +625,7 @@ app.put('/api/menu/:id', (req, res) => {
   res.json({ item: DYNAMIC_MENU[itemIndex] });
 });
 
-app.delete('/api/menu/:id', (req, res) => {
+app.delete(['/api/menu/:id', '/menu/:id'], (req, res) => {
   const { id } = req.params;
   const initialLength = DYNAMIC_MENU.length;
   DYNAMIC_MENU = DYNAMIC_MENU.filter((m) => m.id !== id);
@@ -618,7 +636,7 @@ app.delete('/api/menu/:id', (req, res) => {
 });
 
 // 4. Floor Map Occupancy API (Live Simulated Occupancy)
-app.get('/api/occupancy', (_req, res) => {
+app.get(['/api/occupancy', '/occupancy'], (_req, res) => {
   // Count active orders in each zone
   const activeOrders = ORDERS.filter((o) => o.status !== 'completed');
   const focusCount = activeOrders.filter((o) => o.zone === 'Focus Corner').length;
@@ -665,11 +683,11 @@ app.get('/api/occupancy', (_req, res) => {
 });
 
 // 5. Customer Feedback API
-app.get('/api/feedbacks', (_req, res) => {
+app.get(['/api/feedbacks', '/feedbacks'], (_req, res) => {
   res.json({ feedbacks: FEEDBACKS });
 });
 
-app.post('/api/feedbacks', (req, res) => {
+app.post(['/api/feedbacks', '/feedbacks'], (req, res) => {
   const { rating, tags, comment, orderToken } = req.body;
   const newFeedback: CustomerFeedbackRecord = {
     id: `fb-${Date.now()}`,
@@ -683,26 +701,35 @@ app.post('/api/feedbacks', (req, res) => {
   res.status(201).json({ feedback: newFeedback });
 });
 
-// AI Product Reviews & Guest Sentiment Analysis API
-app.get('/api/product-reviews-analysis', async (_req, res) => {
+// AI Product Reviews & Guest Sentiment Analysis API (Supports both /api/product-reviews-analysis and /product-reviews-analysis)
+app.get(['/api/product-reviews-analysis', '/product-reviews-analysis'], async (_req, res) => {
+  const fallbackData = {
+    overallSentiment: '98.5% Positive Guest Satisfaction',
+    aiHeadline: 'Gemini AI Synthesis: Guest feedback highlights exceptional milk microfoam and ideal acoustic focus zones.',
+    productReviews: [
+      { productName: 'Cortado', category: 'Coffee', avgRating: 4.9, reviewCount: 14, aiSummary: 'Praised for its double ristretto punch and velvety microfoam balance that powers deep work sessions.', highlightTag: 'Best Deep Work Fuel' },
+      { productName: 'Vanilla Cold Brew', category: 'Cold Brew', avgRating: 4.8, reviewCount: 11, aiSummary: 'Madagascan vanilla pod steep yields a smooth, low-acidity refreshing sip favored during afternoon hours.', highlightTag: 'Afternoon Refreshment' },
+      { productName: 'Almond Butter Croissant', category: 'Bakery', avgRating: 4.9, reviewCount: 12, aiSummary: 'Twice-baked flaky pastry with toasted almond frangipane. Guests rave about the crispy crust.', highlightTag: 'Guest Favorite Pastry' },
+      { productName: 'Ceremonial Matcha Latte', category: 'Tea', avgRating: 5.0, reviewCount: 9, aiSummary: 'First-harvest stone-ground Uji matcha whisked with oat milk for jitter-free focused calm.', highlightTag: 'Zen & Antioxidant' },
+    ]
+  };
+
   try {
     const feedbackSnippets = FEEDBACKS.map(f => `Rating: ${f.rating}★, Tags: ${f.tags.join(', ')}, Comment: "${f.comment}"`).join('; ');
-    if (!ai) {
-      return res.json({
-        overallSentiment: '98.5% Positive Guest Satisfaction',
-        aiHeadline: 'Gemini AI Synthesis: Guest feedback highlights exceptional milk microfoam and ideal acoustic focus zones.',
-        productReviews: [
-          { productName: 'Cortado', category: 'Coffee', avgRating: 4.9, reviewCount: 14, aiSummary: 'Praised for its double ristretto punch and velvety microfoam balance that powers deep work sessions.', highlightTag: 'Best Deep Work Fuel' },
-          { productName: 'Vanilla Cold Brew', category: 'Cold Brew', avgRating: 4.8, reviewCount: 11, aiSummary: 'Madagascan vanilla pod steep yields a smooth, low-acidity refreshing sip favored during afternoon hours.', highlightTag: 'Afternoon Refreshment' },
-          { productName: 'Almond Butter Croissant', category: 'Bakery', avgRating: 4.9, reviewCount: 12, aiSummary: 'Twice-baked flaky pastry with toasted almond frangipane. Guests rave about the crispy crust.', highlightTag: 'Guest Favorite Pastry' },
-          { productName: 'Ceremonial Matcha Latte', category: 'Tea', avgRating: 5.0, reviewCount: 9, aiSummary: 'First-harvest stone-ground Uji matcha whisked with oat milk for jitter-free focused calm.', highlightTag: 'Zen & Antioxidant' },
-        ]
-      });
+    const aiClient = getGeminiClient();
+
+    if (!aiClient) {
+      return res.json(fallbackData);
     }
 
-    const response = await ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
-      contents: `
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    let response: any = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        response = await aiClient.models.generateContent({
+          model: modelName,
+          contents: `
 You are the AI Quality & Review Director for CaféOS. Analyze the following customer feedback entries and menu items:
 - Customer Feedbacks: ${feedbackSnippets || 'Cortado and matcha are great.'}
 - Menu items available: Cortado, Vanilla Cold Brew, Almond Butter Croissant, Ceremonial Matcha Latte, Cardamom Spiced Latte.
@@ -719,53 +746,56 @@ Generate:
    - "highlightTag": string (e.g., "Best Deep Work Fuel")
 Return strictly valid JSON.
 `,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            overallSentiment: { type: Type.STRING },
-            aiHeadline: { type: Type.STRING },
-            productReviews: {
-              type: Type.ARRAY,
-              items: {
-                type: Type.OBJECT,
-                properties: {
-                  productName: { type: Type.STRING },
-                  category: { type: Type.STRING },
-                  avgRating: { type: Type.NUMBER },
-                  reviewCount: { type: Type.INTEGER },
-                  aiSummary: { type: Type.STRING },
-                  highlightTag: { type: Type.STRING },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                overallSentiment: { type: Type.STRING },
+                aiHeadline: { type: Type.STRING },
+                productReviews: {
+                  type: Type.ARRAY,
+                  items: {
+                    type: Type.OBJECT,
+                    properties: {
+                      productName: { type: Type.STRING },
+                      category: { type: Type.STRING },
+                      avgRating: { type: Type.NUMBER },
+                      reviewCount: { type: Type.INTEGER },
+                      aiSummary: { type: Type.STRING },
+                      highlightTag: { type: Type.STRING },
+                    },
+                    required: ['productName', 'category', 'avgRating', 'reviewCount', 'aiSummary', 'highlightTag'],
+                  },
                 },
-                required: ['productName', 'category', 'avgRating', 'reviewCount', 'aiSummary', 'highlightTag'],
               },
+              required: ['overallSentiment', 'aiHeadline', 'productReviews'],
             },
           },
-          required: ['overallSentiment', 'aiHeadline', 'productReviews'],
-        },
-      },
-    });
+        });
+        if (response && response.text) break;
+      } catch (err) {
+        console.warn(`Product review analysis model ${modelName} attempt failed:`, err);
+      }
+    }
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json(parsed);
+    if (response && response.text) {
+      const parsed = JSON.parse(response.text || '{}');
+      return res.json(parsed);
+    }
+
+    res.json(fallbackData);
   } catch (err) {
     console.error('Error in product reviews analysis:', err);
-    res.json({
-      overallSentiment: '98.5% Positive Guest Satisfaction',
-      aiHeadline: 'Gemini AI Synthesis: Guest feedback highlights exceptional milk microfoam and ideal acoustic focus zones.',
-      productReviews: [
-        { productName: 'Cortado', category: 'Coffee', avgRating: 4.9, reviewCount: 14, aiSummary: 'Praised for its double ristretto punch and velvety microfoam balance that powers deep work sessions.', highlightTag: 'Best Deep Work Fuel' },
-        { productName: 'Vanilla Cold Brew', category: 'Cold Brew', avgRating: 4.8, reviewCount: 11, aiSummary: 'Madagascan vanilla pod steep yields a smooth, low-acidity refreshing sip favored during afternoon hours.', highlightTag: 'Afternoon Refreshment' },
-        { productName: 'Almond Butter Croissant', category: 'Bakery', avgRating: 4.9, reviewCount: 12, aiSummary: 'Twice-baked flaky pastry with toasted almond frangipane. Guests rave about the crispy crust.', highlightTag: 'Guest Favorite Pastry' },
-        { productName: 'Ceremonial Matcha Latte', category: 'Tea', avgRating: 5.0, reviewCount: 9, aiSummary: 'First-harvest stone-ground Uji matcha whisked with oat milk for jitter-free focused calm.', highlightTag: 'Zen & Antioxidant' },
-      ]
-    });
+    res.json(fallbackData);
   }
 });
 
-// 6. Gemini Recommendation API
-app.post('/api/recommendation', async (req, res) => {
+// 6. Gemini Recommendation API (Supports both /api/recommendation and /recommendation)
+app.post(['/api/recommendation', '/recommendation'], async (req, res) => {
+  // Safe helper to build curated fallback
+  let getFallback = () => generateCuratedFallback('deep_work', 'any', 'any', 'none');
+
   try {
     const {
       intent = 'deep_work',
@@ -778,16 +808,25 @@ app.post('/api/recommendation', async (req, res) => {
       tableNumber = '',
       membershipCode = '',
       previousOrders = [],
-    } = req.body;
+    } = req.body || {};
+
+    getFallback = () => {
+      const fallback = generateCuratedFallback(intent, drinkType, temperature, dietary);
+      if (userName) fallback.greeting = `Welcome back, ${userName}!`;
+      return {
+        ...fallback,
+        offlineNotice: 'Fast Barista fallback applied instantly for high-speed browsing.',
+      };
+    };
 
     const availableDrinks = DYNAMIC_MENU.filter((m) => m.category === 'drink' && m.available);
     const availableSnacks = DYNAMIC_MENU.filter((m) => m.category === 'snack' && m.available);
 
-    if (!ai) {
-      console.warn('GEMINI_API_KEY not set. Using curated barista recommendation.');
-      const fallback = generateCuratedFallback(intent, drinkType, temperature, dietary);
-      if (userName) fallback.greeting = `Welcome back, ${userName}!`;
-      return res.json(fallback);
+    const aiClient = getGeminiClient();
+
+    if (!aiClient) {
+      console.warn('GEMINI_API_KEY not set or invalid. Using curated barista recommendation.');
+      return res.json(getFallback());
     }
 
     const drinksCatalogPrompt = availableDrinks
@@ -841,59 +880,67 @@ STRICT CONSTRAINTS:
 8. Provide a realistic demo queue prep time estimate between 3 and 7 minutes.
 `;
 
-    // Stream generation using generateContentStream and Server-Sent Events (SSE)
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache');
-    res.setHeader('Connection', 'keep-alive');
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    let rawText = '';
+    let modelUsed = '';
 
-    const stream = await ai.models.generateContentStream({
-      model: 'gemini-3.1-flash-lite',
-      contents: `${menuPromptContext}\n\n${userPrompt}`,
-      config: {
-        systemInstruction: 'You are the intelligent Barista Sommelier for CaféOS AI. Return strictly valid JSON conforming to the requested schema.',
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            greeting: { type: Type.STRING },
-            drinkName: { type: Type.STRING },
-            drinkPrice: { type: Type.INTEGER },
-            snackName: { type: Type.STRING },
-            snackPrice: { type: Type.INTEGER },
-            pairingReason: { type: Type.STRING },
-            intentFitExplanation: { type: Type.STRING },
-            suggestedZone: { type: Type.STRING },
-            zoneReason: { type: Type.STRING },
-            ambientSoundtrack: { type: Type.STRING },
-            demoQueueEstimateMinutes: { type: Type.INTEGER },
+    for (const modelName of candidateModels) {
+      try {
+        const response = await aiClient.models.generateContent({
+          model: modelName,
+          contents: `${menuPromptContext}\n\n${userPrompt}`,
+          config: {
+            systemInstruction: 'You are the intelligent Barista Sommelier for CaféOS AI. Return strictly valid JSON conforming to the requested schema.',
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                greeting: { type: Type.STRING },
+                drinkName: { type: Type.STRING },
+                drinkPrice: { type: Type.INTEGER },
+                snackName: { type: Type.STRING },
+                snackPrice: { type: Type.INTEGER },
+                pairingReason: { type: Type.STRING },
+                intentFitExplanation: { type: Type.STRING },
+                suggestedZone: { type: Type.STRING },
+                zoneReason: { type: Type.STRING },
+                ambientSoundtrack: { type: Type.STRING },
+                demoQueueEstimateMinutes: { type: Type.INTEGER },
+              },
+              required: [
+                'greeting',
+                'drinkName',
+                'drinkPrice',
+                'snackName',
+                'snackPrice',
+                'pairingReason',
+                'intentFitExplanation',
+                'suggestedZone',
+                'zoneReason',
+                'ambientSoundtrack',
+                'demoQueueEstimateMinutes',
+              ],
+            },
           },
-          required: [
-            'greeting',
-            'drinkName',
-            'drinkPrice',
-            'snackName',
-            'snackPrice',
-            'pairingReason',
-            'intentFitExplanation',
-            'suggestedZone',
-            'zoneReason',
-            'ambientSoundtrack',
-            'demoQueueEstimateMinutes',
-          ],
-        },
-      },
-    });
+        });
+        if (response && response.text) {
+          rawText = response.text;
+          modelUsed = modelName;
+          break;
+        }
+      } catch (err) {
+        console.warn(`Attempt with model ${modelName} failed:`, err);
+      }
+    }
 
-    let fullText = '';
-    for await (const chunk of stream) {
-      const chunkText = chunk.text || '';
-      fullText += chunkText;
-      res.write(`data: ${JSON.stringify({ partialText: chunkText, fullText })}\n\n`);
+    if (!rawText) {
+      console.warn('All Gemini candidate models failed to generate content. Using fallback.');
+      return res.json(getFallback());
     }
 
     let parsed: any = {};
     try {
-      parsed = JSON.parse(fullText || '{}');
+      parsed = JSON.parse(rawText || '{}');
     } catch {
       parsed = {};
     }
@@ -935,67 +982,68 @@ STRICT CONSTRAINTS:
       ambientSoundtrack: parsed.ambientSoundtrack || 'Curated Café Acoustic Selection',
       demoQueueEstimateMinutes: Math.min(Math.max(queueEstimate, 3), 10),
       isAiGenerated: true,
-      aiModelUsed: 'Gemini 3.1 Flash Lite',
+      aiModelUsed: modelUsed.includes('3.8') ? 'Gemini 3.8 Flash' : 'Gemini 3.1 Flash Lite',
     };
 
-    res.write(`data: ${JSON.stringify({ done: true, result: finalResult })}\n\n`);
-    res.end();
-  } catch (error: any) {
-    console.error('Error generating AI recommendation:', error);
-    const { intent = 'deep_work', drinkType = 'any', temperature = 'any', dietary = 'none', userName = '' } = req.body || {};
-    const fallback = generateCuratedFallback(intent, drinkType, temperature, dietary);
-    if (userName) fallback.greeting = `Welcome back, ${userName}!`;
-    res.json({
-      ...fallback,
-      offlineNotice: 'Fast Barista fallback applied instantly for high-speed browsing.',
-    });
+    return res.json(finalResult);
+  } catch (outerErr) {
+    console.error('Unhandled error in /api/recommendation:', outerErr);
+    return res.json(getFallback());
   }
 });
 
-// 7. Gemini Manager Operational Pulse & Shift Insights
-app.post('/api/manager-insight', async (req, res) => {
-  try {
-    const activeOrders = ORDERS.filter((o) => o.status !== 'completed');
-    const completedOrders = ORDERS.filter((o) => o.status === 'completed');
-    const totalRevenue = ORDERS.reduce((sum, o) => sum + o.totalAmount, 0);
+// 7. Gemini Manager Operational Pulse & Shift Insights (Supports both /api/manager-insight and /manager-insight)
+app.post(['/api/manager-insight', '/manager-insight'], async (req, res) => {
+  const activeOrders = ORDERS.filter((o) => o.status !== 'completed');
+  const completedOrders = ORDERS.filter((o) => o.status === 'completed');
+  const totalRevenue = ORDERS.reduce((sum, o) => sum + o.totalAmount, 0);
 
-    // Compute popular items
-    const itemCountMap: Record<string, number> = {};
-    ORDERS.forEach((o) => {
-      o.items.forEach((itemObj) => {
-        itemCountMap[itemObj.item.name] = (itemCountMap[itemObj.item.name] || 0) + itemObj.quantity;
-      });
+  // Compute popular items
+  const itemCountMap: Record<string, number> = {};
+  ORDERS.forEach((o) => {
+    o.items.forEach((itemObj) => {
+      itemCountMap[itemObj.item.name] = (itemCountMap[itemObj.item.name] || 0) + itemObj.quantity;
     });
-    const popularItems = Object.entries(itemCountMap)
-      .sort((a, b) => b[1] - a[1])
-      .slice(0, 3)
-      .map(([name, count]) => `${name} (${count} ordered)`)
-      .join(', ');
+  });
+  const popularItems = Object.entries(itemCountMap)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([name, count]) => `${name} (${count} ordered)`)
+    .join(', ');
 
-    // Calculate overdue orders (> 2 minutes in new or preparing)
-    const nowTime = Date.now();
-    const overdueCount = activeOrders.filter((o) => {
-      const elapsedMins = (nowTime - o.createdAt) / (1000 * 60);
-      return elapsedMins > (o.prepWarningThresholdMinutes || 2);
-    }).length;
+  // Calculate overdue orders (> 2 minutes in new or preparing)
+  const nowTime = Date.now();
+  const overdueCount = activeOrders.filter((o) => {
+    const elapsedMins = (nowTime - o.createdAt) / (1000 * 60);
+    return elapsedMins > (o.prepWarningThresholdMinutes || 2);
+  }).length;
 
-    const feedbackSnippet = FEEDBACKS.slice(0, 4)
-      .map((f) => `"${f.comment}" (${f.rating}★)`)
-      .join('; ');
+  const feedbackSnippet = FEEDBACKS.slice(0, 4)
+    .map((f) => `"${f.comment}" (${f.rating}★)`)
+    .join('; ');
 
-    if (!ai) {
-      return res.json({
-        summary: `Currently tracking ${activeOrders.length} active orders with ${overdueCount} orders exceeding prep threshold. Top sellers are ${popularItems || 'Cortado and Cold Brew'}. Guest sentiment is averaging 4.9/5.0.`,
-        actionableRecommendation: 'Rebalance barista stations to prioritize preparing tickets over 2 minutes and prep secondary batch of cold brew before next wave.',
-        bottleneck: overdueCount > 0 ? `${overdueCount} orders pending over threshold` : 'Normal kitchen flow',
-        customerTrend: 'High demand for specialty plant-based cold drinks during afternoon work hours.',
-        isAiGenerated: false,
-      });
+  const defaultInsight = {
+    summary: `Currently tracking ${activeOrders.length} active orders with ${overdueCount} orders exceeding prep threshold. Top sellers are ${popularItems || 'Cortado and Cold Brew'}. Guest sentiment is averaging 4.9/5.0.`,
+    actionableRecommendation: 'Rebalance barista stations to prioritize preparing tickets over 2 minutes and prep secondary batch of cold brew before next wave.',
+    bottleneck: overdueCount > 0 ? `${overdueCount} orders pending over threshold` : 'Normal kitchen flow',
+    customerTrend: 'High demand for specialty plant-based cold drinks during afternoon work hours.',
+    isAiGenerated: false,
+  };
+
+  try {
+    const aiClient = getGeminiClient();
+    if (!aiClient) {
+      return res.json(defaultInsight);
     }
 
-    const callPromise = ai.models.generateContent({
-      model: 'gemini-3.1-flash-lite',
-      contents: `
+    const candidateModels = ['gemini-3.8-flash', 'gemini-3.1-flash-lite'];
+    let response: any = null;
+
+    for (const modelName of candidateModels) {
+      try {
+        const callPromise = aiClient.models.generateContent({
+          model: modelName,
+          contents: `
 You are the Operations AI Director for a high-end specialty café called CaféOS.
 Analyze current floor & kitchen shift data:
 - Total Orders Placed: ${ORDERS.length}
@@ -1013,65 +1061,79 @@ Generate:
 4. "customerTrend": 1 sentence capturing observed customer preferences and session intent.
 Return strictly JSON.
 `,
-      config: {
-        responseMimeType: 'application/json',
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            summary: { type: Type.STRING },
-            actionableRecommendation: { type: Type.STRING },
-            bottleneck: { type: Type.STRING },
-            customerTrend: { type: Type.STRING },
+          config: {
+            responseMimeType: 'application/json',
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                summary: { type: Type.STRING },
+                actionableRecommendation: { type: Type.STRING },
+                bottleneck: { type: Type.STRING },
+                customerTrend: { type: Type.STRING },
+              },
+              required: ['summary', 'actionableRecommendation', 'bottleneck', 'customerTrend'],
+            },
           },
-          required: ['summary', 'actionableRecommendation', 'bottleneck', 'customerTrend'],
-        },
-      },
-    });
+        });
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error('Manager insight timed out (4500ms limit)')), 4500)
-    );
+        const timeoutPromise = new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Manager insight timed out (4000ms limit)')), 4000)
+        );
 
-    const response = await Promise.race([callPromise, timeoutPromise]);
+        response = await Promise.race([callPromise, timeoutPromise]);
+        if (response && response.text) break;
+      } catch (err) {
+        console.warn(`Manager insight model ${modelName} attempt failed:`, err);
+      }
+    }
 
-    const parsed = JSON.parse(response.text || '{}');
-    res.json({
-      summary: parsed.summary || 'Shift velocity is consistent with active beverage throughput and positive guest sentiment.',
-      actionableRecommendation: parsed.actionableRecommendation || 'Stage milk pitchers and pre-heat sandwich press for upcoming lunch rush.',
-      bottleneck: parsed.bottleneck || 'Minimal queue lag observed.',
-      customerTrend: parsed.customerTrend || 'Sustained focus orders with oat milk substitutions.',
-      isAiGenerated: true,
-    });
+    if (response && response.text) {
+      const parsed = JSON.parse(response.text || '{}');
+      return res.json({
+        summary: parsed.summary || defaultInsight.summary,
+        actionableRecommendation: parsed.actionableRecommendation || defaultInsight.actionableRecommendation,
+        bottleneck: parsed.bottleneck || defaultInsight.bottleneck,
+        customerTrend: parsed.customerTrend || defaultInsight.customerTrend,
+        isAiGenerated: true,
+      });
+    }
+
+    res.json(defaultInsight);
   } catch (error) {
     console.error('Error generating manager insight:', error);
-    res.json({
-      summary: 'Café operations are balanced with steady queue turnaround time and high guest satisfaction.',
-      actionableRecommendation: 'Ensure cold brew reserves and pastry case display are refreshed for the afternoon rush.',
-      bottleneck: 'None reported.',
-      customerTrend: 'Steady demand for espresso and light pastries.',
-      isAiGenerated: false,
-    });
+    res.json(defaultInsight);
   }
 });
 
-// Vite or Static file serving (only when running full server process, not in Vercel serverless)
-if (!process.env.VERCEL) {
-  if (!isProd) {
-    const { createServer: createViteServer } = await import('vite');
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    app.use(express.static(path.resolve(__dirname, 'dist')));
-    app.get('*', (_req, res) => {
-      res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+// Vite or Static file serving (only when running standalone server process, not in Vercel serverless)
+async function startServer() {
+  if (!process.env.VERCEL) {
+    if (!isProd) {
+      const { createServer: createViteServer } = await import('vite');
+      const vite = await createViteServer({
+        server: { middlewareMode: true },
+        appType: 'spa',
+      });
+      app.use(vite.middlewares);
+    } else {
+      app.use(express.static(path.resolve(__dirname, 'dist')));
+      app.get('*', (_req, res) => {
+        res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
+      });
+    }
+
+    app.listen(PORT, '0.0.0.0', () => {
+      console.log(`CaféOS AI server running on http://0.0.0.0:${PORT} (Production: ${isProd})`);
     });
   }
+}
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`CaféOS AI server running on http://0.0.0.0:${PORT} (Production: ${isProd})`);
+// Start standalone server without blocking module exports (only when not in Vercel or Lambda serverless environment)
+if (!process.env.VERCEL && !process.env.AWS_LAMBDA_FUNCTION_NAME) {
+  startServer().catch((err) => {
+    if ((err as any)?.code !== 'EADDRINUSE') {
+      console.error('Server startup error:', err);
+    }
   });
 }
 

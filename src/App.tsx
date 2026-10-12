@@ -646,11 +646,15 @@ export default function App() {
           if (finalRecData.suggestedZone) {
             setSelectedFloorZone(finalRecData.suggestedZone);
           }
-        } else {
-          const data = await response.json();
-          setRecommendation(data);
-          if (data.suggestedZone) {
-            setSelectedFloorZone(data.suggestedZone);
+        } else if (buffer) {
+          try {
+            const data = JSON.parse(buffer);
+            setRecommendation(data);
+            if (data.suggestedZone) {
+              setSelectedFloorZone(data.suggestedZone);
+            }
+          } catch (e) {
+            console.warn('Could not parse SSE buffer:', e);
           }
         }
       } else {
